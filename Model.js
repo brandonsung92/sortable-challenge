@@ -27,11 +27,11 @@ Model.prototype.writeResults = function() {
     }
 
     // clear file first
-    fs.writeFile(this.resultsFilename, '');
+    fs.writeFileSync(this.resultsFilename, '');
     for (let i = 0; i < results.length; i++) {
         let str = JSON.stringify(results[i]);
         if (i != results.length - 1) str += '\n';
-        fs.appendFile(this.resultsFilename, str);
+        fs.appendFileSync(this.resultsFilename, str);
     }
 }
 
