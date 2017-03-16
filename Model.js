@@ -9,11 +9,8 @@ const Model = function(productsFilename, listingsFilename, resultsFilename) {
 	this.resultsFilename = resultsFilename;
 
 	this.dataObject = {};
-	this.unmatchedListingsByType = {
-		model: [],
-		family: [],
-		manufacturer: []
-	};
+	this.listingCount = 0;
+	this.matchedCount = 0;
 };
 
 Model.prototype.nullFamilyKey = '_noFamily';
@@ -39,14 +36,18 @@ Model.prototype.writeResults = function() {
 }
 
 // Checks two strings to see if they are 'close' enough to evaluate as matching models
-Model.prototype.isModelMatch = function(str1, str2) {
-	let largestStrSize = str1.length > str2.length ? str1.length : str2.length;
-	let diff = str1.length > str2.length ? str1.substr(str2.length) : str2.substr(str1.length);
+Model.prototype.modelMatchFn = function(word, closest) {
+	if (word.length == 0 || closest.length == 0) return false;
+
+	// closest should always be smaller than word in terms of length
+	let largestStrSize = word.length;
+	let diff = word.substr(closest.length);
 
 	// we consider it a match if the difference is small compared to the full string, and
 	// when there are no numbers in the difference
 	let match = (diff.length / largestStrSize < 0.4) && (diff.search(/[0-9]/g) == -1)
 	return match;
+
 };
 Model.prototype.normalizeFamily = function (familyString) {
 	return familyString.toLowerCase();
@@ -70,7 +71,7 @@ Model.prototype.readProducts = function(onDone) {
 
 		if (!this.dataObject[manufacturerKey])
 			this.dataObject[manufacturerKey] = {
-				_trie: new Trie()
+				_trie: new Trie(this.modelMatchFn)
 			};
 
 		if (!this.dataObject[manufacturerKey][modelKey]) {
@@ -100,7 +101,8 @@ Model.prototype.readListings = function(onDone) {
 
 	linereader.on('line', function(line) {
 		let listing = JSON.parse(line);
-		this.insertListing(listing);
+		this.listingCount++;
+		if (this.insertListing(listing)) this.matchedCount++;
 	}.bind(this));
 
 	if (onDone) linereader.on('close', onDone);
@@ -109,34 +111,35 @@ Model.prototype.matchManufacturerKey = function(listingManufacturer, titleWords)
 	let normalizedManufacturer = this.normalizeManufacturer(listingManufacturer);
 	if (this.dataObject[normalizedManufacturer]) return normalizedManufacturer;
 	else {
-		// if the first word is name of a manufacturer, assume that is the manufacturer
+		// if there is no exact match in manufacturer field
+		// attempt to use the the first word of the title
+		// if it matches with the name of a manufacturer, assume that is the manufacturer
 		let normalizedFirstWord = this.normalizeManufacturer(titleWords[0]);
-
 		if (this.dataObject[normalizedFirstWord]) return normalizedFirstWord;
 	}
 
-	return '';
+	return false;
 };
 Model.prototype.matchModelKey = function(manufacturerRef, titleWords) {
 	for (let i = 0; i < titleWords.length; i++) {
 		let normalizedWord = this.normalizeModel(titleWords[i]);
-		let closest = manufacturerRef._trie.getClosest(normalizedWord);
-		if (this.isModelMatch(normalizedWord, closest)) return closest;
+		let closestMatch = manufacturerRef._trie.getClosestMatch(normalizedWord);
+		if (closestMatch) return closestMatch;
 		else if (i != titleWords.length - 1) {
 			// to handle cases where there is a space between parts of a model name in the title
 			// we concatenate consecutive words
 			let normalizedConcatenated = this.normalizeModel(titleWords[i] + titleWords[i + 1]);
-			let closest = manufacturerRef._trie.getClosest(normalizedConcatenated);
-			if (this.isModelMatch(normalizedConcatenated, closest)) return closest;
+			let closestMatch = manufacturerRef._trie.getClosestMatch(normalizedConcatenated);
+			if (closestMatch) return closestMatch;
 		}
 	}
 
-	return '';
+	return false;
 };
 Model.prototype.matchFamilyKey = function(modelRef, titleWords) {
 	for (let i = 0; i < titleWords.length; i++) {
 		let normalizedWord = this.normalizeFamily(titleWords[i]);
-		if (modelRef._trie.exists(normalizedWord)) {
+		if (modelRef._trie.match(normalizedWord)) {
 			return normalizedWord;
 		}
 	}
@@ -144,21 +147,15 @@ Model.prototype.matchFamilyKey = function(modelRef, titleWords) {
 	return this.nullFamilyKey;
 };
 Model.prototype.insertListing = function(listing) {
-	let titleWords = listing.title.split(' ');
+	let titleWords = listing.title.split(/[,\s]/g);
 
 	let manufacturerKey = this.matchManufacturerKey(listing.manufacturer, titleWords);
 
-	if (!manufacturerKey) {
-		this.unmatchedListingsByType.manufacturer.push(listing);
-		return;
-	}
+	if (!manufacturerKey) return false;
 
 	let modelKey = this.matchModelKey(this.dataObject[manufacturerKey], titleWords);
 
-	if (!modelKey) {
-		this.unmatchedListingsByType.model.push(listing);
-		return;
-	}
+	if (!modelKey) return false;
 
 	let modelRef = this.dataObject[manufacturerKey][modelKey];
 	let familyKey = this.matchFamilyKey(modelRef, titleWords);
@@ -170,8 +167,10 @@ Model.prototype.insertListing = function(listing) {
 		listingsRef = modelRef[modelRef._trie.words[0]].listings;
 	} else if (modelRef[familyKey]) listingsRef = modelRef[familyKey].listings;
 
-	if (listingsRef) listingsRef.push(listing);
-	else this.unmatchedListingsByType.family.push(listing);
+	if (!listingsRef) return false;
+
+	listingsRef.push(listing);
+	return true;
 };
 
 module.exports = Model;

@@ -1,7 +1,9 @@
 // A Trie created using JavaScript objects
-const Trie = function() {
+const Trie = function(matchFn) {
 	this.trie = {};
 	this.words = [];
+
+	if (matchFn) this.matchFn = matchFn;
 };
 
 // Insert word into trie
@@ -16,15 +18,14 @@ Trie.prototype.insert = function(word) {
 	this.words.push(word);
 };
 
-// Checks if the given word has an exact match with a word in the trie
-Trie.prototype.exists = function(word) {
-	let current = this.trie;
-	let letters = word.split('');
-	for (let i = 0; i < letters.length; i++) {
-		if (!current[letters[i]]) return false;
-		current = current[letters[i]];
-	}
-	return current.end;
+Trie.prototype.match = function(word) {
+	let closest = this.getClosest(word);
+	return this.matchFn(word, closest);
+};
+
+Trie.prototype.getClosestMatch = function(word) {
+	let closest = this.getClosest(word);
+	return this.matchFn(word, closest) ? closest : false;
 };
 
 // Return the word in the trie that is closest to the given work
@@ -42,6 +43,12 @@ Trie.prototype.getClosest = function(word) {
 	}
 
 	return largestEndingIndex != -1 ? word.substr(0, largestEndingIndex + 1) : '';
+};
+
+// User settable function that takes the word, and the closest word in the trie
+// and returns whether they are a match
+Trie.prototype.matchFn = function(word, closest) {
+	return word == closest;
 };
 
 module.exports = Trie;
